@@ -12,14 +12,6 @@ import './Sidebar.css';
 
 const { Sider } = Layout;
 
-/* icon-name → component (for bottom items only) */
-const ICON_MAP = {
-  SettingOutlined,
-  QuestionCircleOutlined,
-  BookOutlined,
-  PhoneOutlined,
-};
-
 const ROLE_LABELS = {
   admin: 'Admin',
   teacher: 'Teacher',
@@ -113,7 +105,7 @@ export default function Sidebar({ collapsed, setCollapsed, role = 'admin' }) {
         <div className="bottom-divider" />
 
         {bottomItems.map((item) => {
-          const Icon = ICON_MAP[item.icon] || SettingOutlined;
+          const Icon = item.icon || SettingOutlined;
           const active = currentKey === item.key;
 
           const button = (
