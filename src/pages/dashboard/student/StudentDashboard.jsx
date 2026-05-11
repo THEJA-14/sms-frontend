@@ -1,200 +1,310 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Progress, message } from 'antd';
-import { BookOutlined, FileTextOutlined, TrophyOutlined, DollarOutlined, ClockCircleOutlined, CalendarOutlined } from '@ant-design/icons';
-import { getStudentAssignmentHistory, getStudentExamHistory } from '../../../services/assessmentService';
+import { Spin, Badge } from 'antd';
+import {
+  AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from 'recharts';
+import {
+  BookOutlined, FileTextOutlined, TrophyOutlined, DollarOutlined,
+  ClockCircleOutlined, CalendarOutlined, CheckCircleOutlined, 
+  ArrowRightOutlined
+} from '@ant-design/icons';
+import { getStudentAssignmentHistory, getStudentExamHistory, getStudentReportCards } from '../../../services/assessmentService';
 import { getStudentFeeTerms } from '../../../services/feeService';
+import { getStudentAttendanceSummary } from '../../../services/attendanceService';
+import { getStudentProfile } from '../../../services/studentService';
 import dayjs from 'dayjs';
-import './StudentDashboard.css';
+import './StudentDashboard_new.css';
+
+// ─── helpers ─────────────────────────────────────────────── 
+const fmtN = (v) => new Intl.NumberFormat('en-US').format(v ?? 0);
+const fmtD = (v) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
+  }).format(v ?? 0);
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+/* distribute a total across 7 days with a natural-looking shape */
+const weekShape = (total, key) => {
+  const w = [0.11, 0.15, 0.17, 0.18, 0.14, 0.12, 0.13];
+  return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) => ({
+    day: d, [key]: Math.round(total * w[i]),
+  }));
+};
+
+// ─── KPI card ────────────────────────────────────────────── 
+const KpiCard = ({ icon, label, value, chips, accent, onClick }) => (
+  <button className="sdp-kpi" style={{ '--a': accent }} onClick={onClick}>
+    <div className="sdp-kpi__icon">{icon}</div>
+    <div className="sdp-kpi__body">
+      <span className="sdp-kpi__label">{label}</span>
+      <span className="sdp-kpi__value">{value}</span>
+      <div className="sdp-kpi__chips">
+        {chips.filter(Boolean).map((c, i) => (
+          <span key={i} className={`sdp-chip sdp-chip--${c.type}`}>{c.text}</span>
+        ))}
+      </div>
+    </div>
+    <ArrowRightOutlined className="sdp-kpi__arrow" />
+  </button>
+);
+
+// ─── section header ──────────────────────────────────────── 
+const Head = ({ title, action, route, onClick }) => (
+  <div className="sdp-head">
+    <span className="sdp-head__title">{title}</span>
+    {action && (
+      <button className="sdp-ghost" onClick={onClick}>
+        {action} <ArrowRightOutlined style={{ fontSize: 10, marginLeft: 3 }} />
+      </button>
+    )}
+  </div>
+);
 
 export default function StudentDashboard() {
-  const [stats, setStats] = useState({
-    totalClasses: 8,
-    attendance: 92,
-    totalAssignments: 0,
-    completedAssignments: 0,
-    upcomingExams: 0,
-    feeBalance: 0,
-  });
-  const [recentAssignments, setRecentAssignments] = useState([]);
-  const [upcomingExams, setUpcomingExams] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [studentName, setStudentName] = useState('Student');
+
+  const [d, setD] = useState({
+    stats: {
+      attendance: 0,
+      totalAssignments: 0,
+      completedAssignments: 0,
+      totalExams: 0,
+      feeBalance: 0,
+    },
+    assignments: [],
+    testChart: [],
+    gradesChart: [],
+  });
 
   const studentId = localStorage.getItem('userId');
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchAll();
   }, []);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchAll = async () => {
     try {
-      // Fetch assignments
-      const assignmentsRes = await getStudentAssignmentHistory(studentId, 1, 5);
-      setRecentAssignments(assignmentsRes.data.data || []);
-      setStats(prev => ({ 
-        ...prev, 
-        totalAssignments: assignmentsRes.data.total || 0,
-        completedAssignments: assignmentsRes.data.data?.filter(a => a.status === 'Submitted').length || 0
+      setLoading(true);
+      const [profileRes, assignRes, examRes, reportRes, feeRes, attRes] = await Promise.all([
+        getStudentProfile().catch(() => ({ data: {} })),
+        getStudentAssignmentHistory(studentId, 1, 10).catch(() => ({ data: { data: [] } })),
+        getStudentExamHistory(studentId, 1, 10).catch(() => ({ data: { data: [] } })),
+        getStudentReportCards(studentId).catch(() => ({ data: { data: [] } })),
+        getStudentFeeTerms({ student_id: studentId }).catch(() => ({ data: { data: [] } })),
+        getStudentAttendanceSummary(studentId, 1, 1).catch(() => ({ data: {} })),
+      ]);
+
+      setStudentName(profileRes.data?.first_name || 'Student');
+
+      const assignments = assignRes.data?.data || [];
+      const exams = examRes.data?.data || [];
+      const reports = reportRes.data?.data || [];
+      const fees = feeRes.data?.data || [];
+      const attendance = attRes.data?.attendance_percentage || 0;
+
+      const completed = assignments.filter(a => a.status === 'Submitted').length;
+      const totalFees = fees.reduce((s, f) => s + (f.balance_amount || 0), 0);
+
+      // Test scores chart
+      const testChart = exams.slice(0, 6).map((exam, idx) => ({
+        day: `Exam ${idx + 1}`,
+        score: exam.marks_obtained || 0,
       }));
 
-      // Fetch exams
-      const examsRes = await getStudentExamHistory(studentId, 1, 5);
-      setUpcomingExams(examsRes.data.data || []);
-      setStats(prev => ({ ...prev, upcomingExams: examsRes.data.total || 0 }));
+      // Grades chart
+      const gradesChart = reports.length > 0 && reports[0].subjects
+        ? reports[0].subjects.slice(0, 5).map(s => ({
+            subject: s.subject_name || s.name,
+            grade: s.grade_obtained || 0,
+          }))
+        : [];
 
-      // Fetch fees
-      const feesRes = await getStudentFeeTerms({ student_id: studentId });
-      const totalBalance = feesRes.data.data?.reduce((sum, fee) => sum + (fee.balance_amount || 0), 0) || 0;
-      setStats(prev => ({ ...prev, feeBalance: totalBalance }));
-    } catch (error) {
-      console.error('Failed to fetch dashboard data');
+      setD({
+        stats: {
+          attendance: Math.round(attendance),
+          totalAssignments: assignRes.data?.total || 0,
+          completedAssignments: completed,
+          totalExams: examRes.data?.total || 0,
+          feeBalance: totalFees,
+        },
+        assignments: assignments.slice(0, 8),
+        testChart,
+        gradesChart,
+      });
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
-  const statsData = [
-    {
-      title: 'Total Classes',
-      value: stats.totalClasses,
-      icon: <BookOutlined />,
-      color: '#667eea',
-    },
-    {
-      title: 'Attendance',
-      value: `${stats.attendance}%`,
-      icon: <CalendarOutlined />,
-      color: '#52c41a',
-    },
-    {
-      title: 'Assignments',
-      value: stats.totalAssignments,
-      suffix: ` (${stats.completedAssignments} done)`,
-      icon: <ClockCircleOutlined />,
-      color: '#faad14',
-    },
-    {
-      title: 'Fee Balance',
-      value: stats.feeBalance,
-      prefix: '₹',
-      icon: <DollarOutlined />,
-      color: '#ef4444',
-    },
-  ];
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '70vh' }}>
+      <Spin size="large" />
+    </div>
+  );
 
-  const upcomingClasses = [
-    {
-      id: 1,
-      subject: 'Mathematics',
-      teacher: 'Mr. John Smith',
-      time: '09:00 AM - 10:00 AM',
-      room: 'Room 101',
-    },
-    {
-      id: 2,
-      subject: 'Science',
-      teacher: 'Ms. Sarah Wilson',
-      time: '10:15 AM - 11:15 AM',
-      room: 'Room 205',
-    },
-    {
-      id: 3,
-      subject: 'English',
-      teacher: 'Mrs. Emily Brown',
-      time: '11:30 AM - 12:30 PM',
-      room: 'Room 102',
-    },
-  ];
-
-  const assignmentColumns = [
-    { title: 'Assignment', dataIndex: 'title', key: 'title', render: (text) => <strong>{text}</strong> },
-    { title: 'Subject', dataIndex: 'subject_name', key: 'subject_name' },
-    { title: 'Due Date', dataIndex: 'due_date', key: 'due_date', render: (text) => text ? dayjs(text).format('DD/MM/YYYY') : '-' },
-    { title: 'Status', dataIndex: 'status', key: 'status', render: (text) => <Tag color={text === 'Submitted' ? 'green' : 'orange'}>{text || 'Pending'}</Tag> },
-    { title: 'Marks', dataIndex: 'marks_obtained', key: 'marks_obtained', render: (text, record) => text ? `${text}/${record.total_marks}` : '-' },
-  ];
+  const tp = { contentStyle: { borderRadius: 10, border: '1px solid #E2E8F0', boxShadow: '0 4px 16px rgba(0,0,0,.06)', fontSize: 13 }, cursor: { stroke: '#F1F5F9' } };
 
   return (
-    <div className="student-dashboard">
-      {/* Welcome Section */}
-      <div className="dashboard-welcome">
-        <h1 className="dashboard-welcome-title">Welcome Back!</h1>
-        <p className="dashboard-welcome-subtitle">Here's what's happening with your classes today.</p>
+    <div className="sdp-root">
+      {/* ── header ─────────────────────────────────────── */}
+      <div className="sdp-topbar">
+        <div>
+          <h1 className="sdp-title">My Learning Dashboard</h1>
+          <p className="sdp-sub">Hi {studentName}! Track your progress and achievements.</p>
+        </div>
+        <div className="sdp-topbar__r">
+          <button className="sdp-btn sdp-btn--o">
+            <CalendarOutlined />
+            {dayjs().format('MMM DD')} – {dayjs().add(30, 'day').format('MMM DD, YYYY')}
+          </button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <Row gutter={[16, 16]} className="dashboard-stats">
-        {statsData.map((stat, index) => (
-          <Col xs={24} sm={12} lg={6} key={index}>
-            <Card bordered={false} className="stat-card">
-              <Statistic
-                title={stat.title}
-                value={stat.value}
-                prefix={stat.prefix}
-                suffix={stat.suffix}
-                valueStyle={{ color: stat.color }}
-              />
-              <div className="stat-icon" style={{ color: stat.color }}>
-                {stat.icon}
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {/* Main Content */}
-      <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
-        {/* Today's Classes */}
-        <Col xs={24} lg={14}>
-          <Card title="Today's Classes" bordered={false} className="content-card">
-            {upcomingClasses.map((item) => (
-              <div key={item.id} className="class-item">
-                <div className="class-icon">
-                  <BookOutlined />
-                </div>
-                <div className="class-details">
-                  <div className="class-subject">{item.subject}</div>
-                  <div className="class-teacher">{item.teacher}</div>
-                  <div className="class-meta">
-                    <ClockCircleOutlined /> {item.time} • {item.room}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Card>
-        </Col>
-
-        {/* Recent Assignments */}
-        <Col xs={24} lg={10}>
-          <Card title="Upcoming Assignments" bordered={false} className="content-card">
-            {recentAssignments.slice(0, 3).map((assignment) => (
-              <div key={assignment.id} className="assignment-item">
-                <div>
-                  <div className="assignment-title">{assignment.title}</div>
-                  <div className="assignment-subject">{assignment.subject_name}</div>
-                  <div className="assignment-due">
-                    <CalendarOutlined /> Due: {dayjs(assignment.due_date).format('DD MMM, YYYY')}
-                  </div>
-                </div>
-                <Tag color={assignment.status === 'Submitted' ? 'green' : 'orange'}>
-                  {assignment.status || 'Pending'}
-                </Tag>
-              </div>
-            ))}
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Recent Assignments Table */}
-      <Card title="Recent Assignments" style={{ marginTop: 24 }} bordered={false}>
-        <Table
-          columns={assignmentColumns}
-          dataSource={recentAssignments}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
+      {/* ── KPI strip ──────────────────────────────────── */}
+      <div className="sdp-kpi-row">
+        <KpiCard 
+          icon={<CalendarOutlined />} 
+          label="Attendance" 
+          value={`${d.stats.attendance}%`}
+          chips={[{ type: d.stats.attendance >= 85 ? 'g' : 'r', text: d.stats.attendance >= 85 ? '✓ Good' : 'Needs improvement' }]}
+          accent="#2563EB" 
         />
-      </Card>
+        <KpiCard 
+          icon={<BookOutlined />} 
+          label="Assignments" 
+          value={fmtN(d.stats.totalAssignments)}
+          chips={[{ type: 'g', text: `${d.stats.completedAssignments} completed` }]}
+          accent="#0EA5E9" 
+        />
+        <KpiCard 
+          icon={<TrophyOutlined />} 
+          label="Total Exams" 
+          value={fmtN(d.stats.totalExams)}
+          chips={[{ type: 'b', text: 'View Results' }]}
+          accent="#8B5CF6" 
+        />
+        <KpiCard 
+          icon={<DollarOutlined />} 
+          label="Fee Balance" 
+          value={fmtD(d.stats.feeBalance)}
+          chips={[{ type: d.stats.feeBalance > 0 ? 'r' : 'g', text: d.stats.feeBalance > 0 ? 'Pending' : 'Clear' }]}
+          accent="#10B981" 
+        />
+      </div>
+
+      {/* ── row A: Test Scores + Grades ────────────── */}
+      <div className="sdp-grid sdp-grid--6-4">
+        <div className="sdp-card">
+          <Head title="Test Score Activity" action="View all" />
+          <div className="sdp-legend">
+            <span><i className="sdp-dot" style={{ background: '#3B82F6' }} />Score</span>
+          </div>
+          {d.testChart.length > 0 ? (
+            <ResponsiveContainer width="100%" height={210}>
+              <AreaChart data={d.testChart} margin={{ top: 8, right: 12, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gS" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="4 4" stroke="#F1F5F9" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: '#94A3B8', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#94A3B8', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <Tooltip {...tp} />
+                <Area type="monotone" dataKey="score" stroke="#3B82F6" strokeWidth={2.5} fill="url(#gS)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : <p className="sdp-empty">No test data available yet.</p>}
+        </div>
+
+        <div className="sdp-card">
+          <Head title="Performance Stats" />
+          <div className="sdp-att-stats">
+            <div className="sdp-att-stat" style={{ '--c': '#2563EB' }}>
+              <span className="sdp-att-n">{d.stats.completedAssignments}</span>
+              <span className="sdp-att-l">Assignments Done</span>
+            </div>
+            <div className="sdp-att-stat" style={{ '--c': '#10B981' }}>
+              <span className="sdp-att-n">{d.stats.attendance}%</span>
+              <span className="sdp-att-l">Attendance</span>
+            </div>
+            <div className="sdp-att-stat" style={{ '--c': '#F59E0B' }}>
+              <span className="sdp-att-n">{d.stats.totalExams}</span>
+              <span className="sdp-att-l">Exams Given</span>
+            </div>
+            <div className="sdp-att-stat" style={{ '--c': '#EF4444' }}>
+              <span className="sdp-att-n">{fmtN(d.stats.feeBalance)}</span>
+              <span className="sdp-att-l">Fee Pending</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Grade by Subject ────────────────────────────── */}
+      <div className="sdp-card">
+        <Head title="Grade by Subject" action="View Report" />
+        <div className="sdp-legend">
+          <span><i className="sdp-dot" style={{ background: '#8B5CF6' }} />Grades</span>
+        </div>
+        {d.gradesChart.length > 0 ? (
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={d.gradesChart} margin={{ top: 4, right: 8, left: -24, bottom: 30 }} barCategoryGap="24%">
+              <CartesianGrid strokeDasharray="4 4" stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="subject" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip {...tp} />
+              <Bar dataKey="grade" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <p className="sdp-empty">No grade data available yet.</p>}
+      </div>
+
+      {/* ── Assignments Table ────────────────────────────── */}
+      {d.assignments.length > 0 && (
+        <div className="sdp-card sdp-card--full">
+          <Head title="Assignments" action="View all" />
+          <div className="sdp-tbl-wrap">
+            <table className="sdp-tbl">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Assignment</th>
+                  <th>Subject</th>
+                  <th>Due Date</th>
+                  <th>Status</th>
+                  <th>Marks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.assignments.map((a, i) => {
+                  const isDone = a.status === 'Submitted';
+                  const marks = a.marks_obtained || 0;
+                  const total = a.total_marks || 100;
+                  return (
+                    <tr key={i}>
+                      <td className="sdp-td--mute">{i + 1}</td>
+                      <td><strong>{a.title}</strong></td>
+                      <td>{a.subject_name}</td>
+                      <td>{dayjs(a.due_date).format('DD MMM YYYY')}</td>
+                      <td>
+                        <span className={`sdp-badge ${isDone ? 'sdp-badge--g' : 'sdp-badge--a'}`}>
+                          {isDone ? 'Submitted' : 'Pending'}
+                        </span>
+                      </td>
+                      <td className={marks > 0 ? 'sdp-td--g' : 'sdp-td--mute'}>{marks > 0 ? `${marks}/${total}` : '–'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
