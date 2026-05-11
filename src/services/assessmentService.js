@@ -144,7 +144,7 @@ export const getStudentAssignmentHistory = async (
   pageSize = 10
 ) => {
   return await api.get(
-    `/assessment/students/${studentId}/assignment-history`,
+    `/assessment/history/student/${studentId}/assignments`,
     { params: { page, pageSize } }
   );
 };
@@ -155,14 +155,14 @@ export const getStudentExamHistory = async (
   pageSize = 10
 ) => {
   return await api.get(
-    `/assessment/students/${studentId}/exam-history`,
+    `/assessment/history/student/${studentId}/exam`,
     { params: { page, pageSize } }
   );
 };
 
 export const getStudentAcademicHistory = async (studentId) => {
   return await api.get(
-    `/assessment/students/${studentId}/academic-history`
+    `/assessment/history/student/${studentId}/academic`
   );
 };
 
@@ -179,7 +179,7 @@ export const publishReportCards = async (reportCardIds) => {
 
 export const getStudentReportCards = async (studentId) => {
   return await api.get(
-    `/assessment/students/${studentId}/report-cards`
+    `/assessment/report-cards/student/${studentId}`
   );
 };
 
