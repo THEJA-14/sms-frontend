@@ -382,12 +382,6 @@ const getStudentMenu = () => {
       icon: DollarOutlined,
       path: '/student/fees',
     },
-    {
-      key: 'schedule',
-      label: 'Class Schedule',
-      icon: CalendarOutlined,
-      path: '/student/schedule',
-    },
   ];
 };
 

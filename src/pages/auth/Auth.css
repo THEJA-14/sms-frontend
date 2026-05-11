@@ -118,10 +118,13 @@
   height: 48px;
   font-size: 15px;
   color: #333333;
+  line-height: 48px;
+  padding: 0 12px !important;
 }
 
 .auth-input::placeholder {
   color: #999999;
+  line-height: 48px;
 }
 
 .auth-input:hover {
@@ -137,10 +140,12 @@
 /* Password Input */
 .auth-input.ant-input-password {
   padding-right: 12px;
+  line-height: 48px;
 }
 
 .auth-input .ant-input-password-icon {
   color: #999999;
+  line-height: 48px;
 }
 
 .auth-input .ant-input-password-icon:hover {
